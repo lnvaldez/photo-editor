@@ -4,8 +4,8 @@ import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'dart:ui' as ui;
 import 'package:flutter/rendering.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:image/image.dart' as img;
+import 'package:permission_handler/permission_handler.dart';
 
 class EditScreen extends StatefulWidget {
   final XFile imageFile;
@@ -176,9 +176,46 @@ class _EditScreenState extends State<EditScreen> {
     _image = Image.file(File(widget.imageFile.path));
   }
 
+  Future<bool> _requestStoragePermission() async {
+    var status = await Permission.storage.status;
+    if (status.isDenied) {
+      status = await Permission.storage.request();
+    }
+
+    var photosStatus = await Permission.photos.status;
+    if (photosStatus.isDenied) {
+      photosStatus = await Permission.photos.request();
+    }
+
+    var manageStorageStatus = await Permission.manageExternalStorage.status;
+    if (manageStorageStatus.isDenied) {
+      manageStorageStatus = await Permission.manageExternalStorage.request();
+    }
+
+    return status.isGranted ||
+        photosStatus.isGranted ||
+        manageStorageStatus.isGranted;
+  }
+
   Future<void> _saveImage() async {
+    bool hasPermission = await _requestStoragePermission();
+    if (!hasPermission) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Storage permission is required to save images')),
+        );
+      }
+      return;
+    }
+
     try {
-      // Capture the widget as an image
+      const String dirPath = '/storage/emulated/0/DCIM/Camera';
+      final Directory dir = Directory(dirPath);
+      if (!await dir.exists()) {
+        await dir.create(recursive: true);
+      }
+
       RenderRepaintBoundary boundary = _globalKey.currentContext!
           .findRenderObject() as RenderRepaintBoundary;
       ui.Image image = await boundary.toImage(pixelRatio: 3.0);
@@ -188,46 +225,46 @@ class _EditScreenState extends State<EditScreen> {
       if (byteData != null) {
         final bytes = byteData.buffer.asUint8List();
 
-        final directory = await getExternalStorageDirectory();
-        if (directory != null) {
-          final String fileName =
-              'edited_photo_${DateTime.now().millisecondsSinceEpoch}.png';
-          final String filePath = '${directory.path}/$fileName';
+        final String fileName =
+            'edited_photo_${DateTime.now().millisecondsSinceEpoch}.jpg';
+        final String galleryPath = '$dirPath/$fileName';
 
-          final File file = File(filePath);
-          await file.writeAsBytes(bytes);
+        final decodedImage = img.decodeImage(bytes);
+        if (decodedImage != null) {
+          final jpg = img.encodeJpg(decodedImage, quality: 90);
+          final File file = File(galleryPath);
+          await file.writeAsBytes(jpg);
 
-          await _addToGallery(filePath);
+          try {
+            final result = await Process.run('am', [
+              'broadcast',
+              '-a',
+              'android.intent.action.MEDIA_SCANNER_SCAN_FILE',
+              '-d',
+              'file://$galleryPath'
+            ]);
+            print('Media scan result: ${result.stdout}');
+          } catch (e) {
+            print('Error scanning media: $e');
+          }
 
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                  content: Text('Image saved to gallery successfully!')),
+              SnackBar(
+                content: Text('Image saved to: $galleryPath'),
+                duration: const Duration(seconds: 5),
+              ),
             );
           }
         }
       }
     } catch (e) {
+      print('Error saving image: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Failed to save image: $e')),
         );
       }
-    }
-  }
-
-  Future<void> _addToGallery(String filePath) async {
-    try {
-      final bytes = await File(filePath).readAsBytes();
-      final image = img.decodeImage(bytes);
-      if (image != null) {
-        final jpg = img.encodeJpg(image);
-        final galleryPath =
-            '/storage/emulated/0/DCIM/Camera/${DateTime.now().millisecondsSinceEpoch}.jpg';
-        await File(galleryPath).writeAsBytes(jpg);
-      }
-    } catch (e) {
-      print('Error adding to gallery: $e');
     }
   }
 

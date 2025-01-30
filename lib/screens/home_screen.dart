@@ -29,6 +29,25 @@ class HomeScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Placeholder();
+    return Scaffold(
+        appBar: AppBar(
+          title: const Text('Photo Editor'),
+        ),
+        body: Center(
+            child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            ElevatedButton.icon(
+              onPressed: () => _pickImage(ImageSource.camera, context),
+              icon: const Icon(Icons.camera_alt),
+              label: const Text('Take Photo'),
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton.icon(
+                onPressed: () => _pickImage(ImageSource.gallery, context),
+                icon: const Icon(Icons.photo_library),
+                label: const Text('Choose from Gallery'))
+          ],
+        )));
   }
 }
